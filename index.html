@@ -236,6 +236,8 @@ main{ max-width:560px; margin:0 auto; padding-top:54px; padding-bottom:70px; pos
 .toast{ position:fixed; top:14px; left:50%; transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; z-index:90; opacity:0; transition:opacity .3s ease; pointer-events:none; font-family:'Nunito',system-ui,sans-serif; font-weight:600; }
 .toast.show{ opacity:.95; }
 .note-box{ background:var(--blue); border-radius:10px; padding:10px 12px; font-size:12px; font-family:'Nunito',system-ui,sans-serif; font-weight:600; color:#3a4b53; margin-top:8px; }
+.upload-status{ font-size:12px; font-family:'Nunito',system-ui,sans-serif; font-weight:600; color:var(--pink-d); margin-top:4px; min-height:14px; }
+.field input[type="file"]{ padding:6px; font-size:13px; }
 
 /* ---------- Nav bar ---------- */
 #navBar{ position:sticky; top:54px; z-index:20; display:flex; gap:6px; overflow-x:auto; padding:10px 14px; background:rgba(244,251,255,0.9); backdrop-filter:blur(6px); border-bottom:1px solid var(--paper3); -webkit-overflow-scrolling:touch; }
@@ -1127,7 +1129,8 @@ main{ max-width:560px; margin:0 auto; padding-top:54px; padding-bottom:70px; pos
       var row = document.createElement('div'); row.className='repeat-row';
       row.innerHTML =
         '<div class="field"><label>Caption foto '+(idx+1)+'</label><input data-g="'+idx+'" data-k="caption" value="'+escapeAttr(item.caption||'')+'"></div>'+
-        '<div class="field"><label>URL gambar</label><input data-g="'+idx+'" data-k="img" value="'+escapeAttr(item.img||'')+'" placeholder="https://..."></div>'+
+        '<div class="field"><label>Upload foto dari perangkat</label><input type="file" accept="image/*" data-upload-g="'+idx+'"><div class="upload-status" id="uploadStatus'+idx+'"></div></div>'+
+        '<div class="field"><label>URL gambar (otomatis terisi setelah upload, atau isi manual)</label><input data-g="'+idx+'" data-k="img" value="'+escapeAttr(item.img||'')+'" placeholder="https://..."></div>'+
         '<div class="row-actions"><button type="button" class="mini-btn" data-del-g="'+idx+'">Hapus</button></div>';
       wrap.appendChild(row);
     });
@@ -1137,11 +1140,49 @@ main{ max-width:560px; margin:0 auto; padding-top:54px; padding-bottom:70px; pos
         renderGalleryEditor();
       });
     });
+    wrap.querySelectorAll('[data-upload-g]').forEach(function(input){
+      input.addEventListener('change', function(){
+        var idx = parseInt(input.getAttribute('data-upload-g'),10);
+        var file = input.files && input.files[0];
+        uploadGalleryPhoto(file, idx);
+      });
+    });
   }
   document.getElementById('addPhoto').addEventListener('click', function(){
     data.gallery.push({caption:'Momen baru', img:''});
     renderGalleryEditor();
   });
+
+  async function uploadGalleryPhoto(file, idx){
+    if(!file) return;
+    var statusEl = document.getElementById('uploadStatus'+idx);
+    if(!file.type.startsWith('image/')){
+      if(statusEl) statusEl.textContent = 'File harus berupa gambar.';
+      return;
+    }
+    if(file.size > 5*1024*1024){
+      if(statusEl) statusEl.textContent = 'Ukuran foto maksimal 5MB.';
+      return;
+    }
+    if(statusEl) statusEl.textContent = 'Mengupload...';
+    var ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
+    var path = 'gallery-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).slice(2,7) + '.' + ext;
+    try{
+      var up = await supabase.storage.from('gallery').upload(path, file, { cacheControl:'3600', upsert:false });
+      if(up.error){
+        if(statusEl) statusEl.textContent = 'Gagal upload: ' + up.error.message;
+        return;
+      }
+      var pub = supabase.storage.from('gallery').getPublicUrl(path);
+      var url = pub.data && pub.data.publicUrl;
+      if(!data.gallery[idx]) data.gallery[idx] = {caption:'', img:''};
+      data.gallery[idx].img = url;
+      renderGalleryEditor();
+      toast('Foto berhasil diupload ✅ (jangan lupa klik Simpan)');
+    }catch(e){
+      if(statusEl) statusEl.textContent = 'Gagal konek ke penyimpanan foto.';
+    }
+  }
 
   function renderTimelineEditor(){
     var wrap = document.getElementById('f_timeline_list'); wrap.innerHTML='';
